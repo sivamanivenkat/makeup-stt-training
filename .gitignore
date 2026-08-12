@@ -1,0 +1,21 @@
+node_modules/
+.env
+
+# generated data — reproducible via pipeline, too large for git
+checkpoints/
+dataset/
+model/
+
+# model export artifacts — large binaries, not source
+export/
+export_onnx/
+export_onnx_quant/
+handoff/
+model_best/
+temp/
+
+# caches / stray binaries
+__pycache__/
+deno.exe
+
+*.log

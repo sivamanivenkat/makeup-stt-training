@@ -1,0 +1,21 @@
+{
+  "name": "makeup-stt-pipeline",
+  "version": "1.0.0",
+  "description": "YouMakeup → Whisper STT fine-tuning dataset pipeline",
+  "type": "module",
+  "main": "orchestrator.js",
+  "scripts": {
+    "start": "node orchestrator.js",
+    "download": "node orchestrator.js download",
+    "transcribe": "node orchestrator.js transcribe",
+    "cleanup": "node orchestrator.js cleanup",
+    "package": "node orchestrator.js package",
+    "validate": "node validate.js"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "dotenv": "^16.4.5",
+    "openai": "^6.46.0",
+    "p-limit": "^5.0.0"
+  }
+}
