@@ -490,6 +490,14 @@ def main() -> None:
         if isinstance(prediction_ids, tuple):
             prediction_ids = prediction_ids[0]
 
+        prediction_ids = np.copy(prediction_ids)
+
+        # Variable-length generated sequences across eval batches get padded
+        # with -100 when concatenated. The tokenizer's Rust decoder can't
+        # cast -100 to its internal unsigned int type and raises an
+        # OverflowError, so it needs the same cleanup as label_ids below.
+        prediction_ids[prediction_ids == -100] = processor.tokenizer.pad_token_id
+
         label_ids = np.copy(prediction.label_ids)
 
         label_ids[label_ids == -100] = processor.tokenizer.pad_token_id
