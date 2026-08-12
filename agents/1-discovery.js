@@ -1,11 +1,11 @@
-import fs from 'fs';
-import path from 'path';
-import { log } from '../utils/logger.js';
+import fs from "fs";
+import path from "path";
+import { log } from "../utils/logger.js";
 
 export function seededShuffle(arr, seed) {
   let s = seed >>> 0;
   const rand = () => {
-    s = Math.imul(1664525, s) + 1013904223 >>> 0;
+    s = (Math.imul(1664525, s) + 1013904223) >>> 0;
     return s / 0x100000000;
   };
   const a = [...arr];
@@ -18,9 +18,9 @@ export function seededShuffle(arr, seed) {
 
 function parseTime(t) {
   if (t == null) return 0;
-  if (typeof t === 'number') return t;
+  if (typeof t === "number") return t;
   const str = String(t).trim();
-  const parts = str.split(':').map(Number);
+  const parts = str.split(":").map(Number);
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
   if (parts.length === 2) return parts[0] * 60 + parts[1];
   return parseFloat(str) || 0;
@@ -38,9 +38,9 @@ export function parseVideoEntry(line) {
 
   for (const [stepNum, data] of entries) {
     const start = parseTime(data.startime ?? data.start_time ?? data.start);
-    const end   = parseTime(data.endtime   ?? data.end_time   ?? data.end);
-    const area  = Array.isArray(data.area)   ? data.area   : [data.area   || 'face'];
-    const caption = data.caption || data.description || '';
+    const end = parseTime(data.endtime ?? data.end_time ?? data.end);
+    const area = Array.isArray(data.area) ? data.area : [data.area || "face"];
+    const caption = data.caption || data.description || "";
     if (end > start && caption) {
       steps.push({ stepNum, start, end, area, caption });
     }
@@ -51,33 +51,42 @@ export function parseVideoEntry(line) {
 
 export function loadAllVideos(dataDir) {
   const sources = [
-    path.join(dataDir, 'train', 'train_steps.json'),
-    path.join(dataDir, 'val',   'val_steps.json'),
-    path.join(dataDir, 'test',  'test_steps.json'),
+    path.join(dataDir, "train", "train_steps.json"),
+    path.join(dataDir, "val", "val_steps.json"),
+    path.join(dataDir, "test", "test_steps.json"),
   ].filter(fs.existsSync);
 
-  if (!sources.length) throw new Error(`No YouMakeup JSON files found in ${dataDir}`);
+  if (!sources.length)
+    throw new Error(`No YouMakeup JSON files found in ${dataDir}`);
 
   const allVideos = [];
   for (const src of sources) {
-    const lines = fs.readFileSync(src, 'utf8').trim().split('\n').filter(Boolean);
+    const lines = fs
+      .readFileSync(src, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean);
     for (const line of lines) {
       try {
         const v = parseVideoEntry(line);
         if (v.steps.length) allVideos.push(v);
-      } catch { /* skip malformed lines */ }
+      } catch {
+        /* skip malformed lines */
+      }
     }
   }
 
-  log.info(`Loaded ${allVideos.length} valid videos from ${sources.length} source files`);
+  log.info(
+    `Loaded ${allVideos.length} valid videos from ${sources.length} source files`,
+  );
   return allVideos;
 }
 
 export function discover({
-  dataDir       = './data',
-  targetVideos  = 1000,
-  seed          = 42,
-  ratios        = [0.70, 0.15, 0.15],
+  dataDir = "./data",
+  targetVideos = 1000,
+  seed = 42,
+  ratios = [0.7, 0.15, 0.15],
 } = {}) {
   const allVideos = loadAllVideos(dataDir);
   const shuffled = seededShuffle(allVideos, seed).slice(0, targetVideos);
@@ -86,9 +95,9 @@ export function discover({
   const v = Math.floor(shuffled.length * (r0 + r1));
 
   const splitMap = new Map();
-  shuffled.slice(0, t).forEach(({ videoId }) => splitMap.set(videoId, 'train'));
-  shuffled.slice(t, v).forEach(({ videoId }) => splitMap.set(videoId, 'val'));
-  shuffled.slice(v).forEach(({ videoId })    => splitMap.set(videoId, 'test'));
+  shuffled.slice(0, t).forEach(({ videoId }) => splitMap.set(videoId, "train"));
+  shuffled.slice(t, v).forEach(({ videoId }) => splitMap.set(videoId, "val"));
+  shuffled.slice(v).forEach(({ videoId }) => splitMap.set(videoId, "test"));
 
   const segments = [];
   for (const { videoId, steps } of shuffled) {
@@ -99,9 +108,9 @@ export function discover({
         videoId,
         stepNum: step.stepNum,
         split,
-        start:   step.start,
-        end:     step.end,
-        area:    step.area,
+        start: step.start,
+        end: step.end,
+        area: step.area,
         caption: step.caption,
       });
     }
@@ -111,10 +120,16 @@ export function discover({
   const videoCounts = { train: t, val: v - t, test: shuffled.length - v };
   for (const s of segments) counts[s.split]++;
 
-  log.stat('Videos sampled', shuffled.length);
-  log.stat('Split (videos)', `train ${videoCounts.train} / val ${videoCounts.val} / test ${videoCounts.test}`);
-  log.stat('Total segments', segments.length);
-  log.stat('Split (segments)', `train ${counts.train} / val ${counts.val} / test ${counts.test}`);
+  log.stat("Videos sampled", shuffled.length);
+  log.stat(
+    "Split (videos)",
+    `train ${videoCounts.train} / val ${videoCounts.val} / test ${videoCounts.test}`,
+  );
+  log.stat("Total segments", segments.length);
+  log.stat(
+    "Split (segments)",
+    `train ${counts.train} / val ${counts.val} / test ${counts.test}`,
+  );
 
   return segments;
 }

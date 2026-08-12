@@ -5,6 +5,7 @@ audio file from the test split.
 Usage:
     python test_local.py
 """
+
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 import torch
 import librosa

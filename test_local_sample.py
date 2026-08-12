@@ -5,6 +5,7 @@ against the reference transcription.
 Usage:
     python test_local_sample.py
 """
+
 import json
 import random
 import re

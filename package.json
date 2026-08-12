@@ -17,5 +17,8 @@
     "dotenv": "^16.4.5",
     "openai": "^6.46.0",
     "p-limit": "^5.0.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.6"
   }
 }

@@ -20,7 +20,6 @@ import shutil
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
 
-
 # Set environment variables before importing Hugging Face libraries.
 os.environ.setdefault(
     "PYTORCH_CUDA_ALLOC_CONF",
@@ -54,10 +53,10 @@ from transformers import (
 
 from transformers.trainer_utils import get_last_checkpoint
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Text normalization
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def normalize_text(text: str) -> str:
     """
@@ -76,6 +75,7 @@ def normalize_text(text: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # Checkpoint helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def checkpoint_dirs(root: str) -> List[str]:
     """
@@ -193,10 +193,7 @@ class DriveBackupCallback(TrainerCallback):
         )
 
         if os.path.isdir(source_checkpoint):
-            print(
-                f"Backing up {checkpoint_name} "
-                f"to {destination_checkpoint}"
-            )
+            print(f"Backing up {checkpoint_name} " f"to {destination_checkpoint}")
 
             shutil.copytree(
                 source_checkpoint,
@@ -204,10 +201,7 @@ class DriveBackupCallback(TrainerCallback):
                 dirs_exist_ok=True,
             )
 
-            print(
-                f"Backed up {checkpoint_name} "
-                f"-> {destination_checkpoint}"
-            )
+            print(f"Backed up {checkpoint_name} " f"-> {destination_checkpoint}")
 
         # Never delete the best checkpoint — load_best_model_at_end needs it
         # on disk at the end of training, and it may not be one of the most
@@ -242,6 +236,7 @@ class DriveBackupCallback(TrainerCallback):
 # ─────────────────────────────────────────────────────────────────────────────
 # Data collator
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @dataclass
 class DataCollatorSpeechSeq2SeqWithPadding:
@@ -288,9 +283,7 @@ class DataCollatorSpeechSeq2SeqWithPadding:
         )
 
         if labels.shape[1] > 0:
-            decoder_start_tokens = (
-                labels[:, 0] == self.decoder_start_token_id
-            )
+            decoder_start_tokens = labels[:, 0] == self.decoder_start_token_id
 
             if decoder_start_tokens.all().cpu().item():
                 labels = labels[:, 1:]
@@ -334,6 +327,7 @@ def prepare(batch: Dict[str, Any]) -> Dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def main() -> None:
     global processor
@@ -431,9 +425,7 @@ def main() -> None:
     print("=" * 70)
 
     if not os.path.isdir(args.dataset):
-        raise FileNotFoundError(
-            f"Dataset directory was not found: {args.dataset}"
-        )
+        raise FileNotFoundError(f"Dataset directory was not found: {args.dataset}")
 
     # Restore checkpoint before loading the processor and model.
     last_checkpoint = restore_checkpoint_from_backup(
@@ -443,11 +435,7 @@ def main() -> None:
 
     # Use the checkpoint as the model and processor source when available.
     # This prevents downloading openai/whisper-small again.
-    model_source = (
-        last_checkpoint
-        if last_checkpoint is not None
-        else args.model
-    )
+    model_source = last_checkpoint if last_checkpoint is not None else args.model
 
     print(f"Loading processor from: {model_source}")
 
@@ -477,14 +465,11 @@ def main() -> None:
         "test",
     }
 
-    missing_splits = required_splits.difference(
-        raw_dataset.keys()
-    )
+    missing_splits = required_splits.difference(raw_dataset.keys())
 
     if missing_splits:
         raise ValueError(
-            "Dataset is missing required splits: "
-            + ", ".join(sorted(missing_splits))
+            "Dataset is missing required splits: " + ", ".join(sorted(missing_splits))
         )
 
     raw_dataset = raw_dataset.cast_column(
@@ -495,19 +480,13 @@ def main() -> None:
     train_columns = raw_dataset["train"].column_names
 
     if "audio" not in train_columns:
-        raise ValueError(
-            "Dataset must contain an 'audio' column."
-        )
+        raise ValueError("Dataset must contain an 'audio' column.")
 
     if "transcription" not in train_columns:
-        raise ValueError(
-            "Dataset must contain a 'transcription' column."
-        )
+        raise ValueError("Dataset must contain a 'transcription' column.")
 
     columns_to_remove = [
-        column
-        for column in train_columns
-        if column not in ("input_features", "labels")
+        column for column in train_columns if column not in ("input_features", "labels")
     ]
 
     print("Preparing dataset features...")
@@ -561,9 +540,7 @@ def main() -> None:
 
         label_ids = np.copy(prediction.label_ids)
 
-        label_ids[label_ids == -100] = (
-            processor.tokenizer.pad_token_id
-        )
+        label_ids[label_ids == -100] = processor.tokenizer.pad_token_id
 
         prediction_strings = processor.tokenizer.batch_decode(
             prediction_ids,
@@ -575,15 +552,9 @@ def main() -> None:
             skip_special_tokens=True,
         )
 
-        prediction_strings = [
-            normalize_text(text)
-            for text in prediction_strings
-        ]
+        prediction_strings = [normalize_text(text) for text in prediction_strings]
 
-        label_strings = [
-            normalize_text(text)
-            for text in label_strings
-        ]
+        label_strings = [normalize_text(text) for text in label_strings]
 
         wer = 100 * wer_metric.compute(
             predictions=prediction_strings,
@@ -600,43 +571,32 @@ def main() -> None:
 
     training_args = Seq2SeqTrainingArguments(
         output_dir=args.output,
-
         per_device_train_batch_size=args.batch,
         gradient_accumulation_steps=args.grad_accum,
-
         learning_rate=args.lr,
         weight_decay=0.01,
         warmup_steps=500,
         max_steps=args.steps,
-
         gradient_checkpointing=False,
         fp16=torch.cuda.is_available(),
-
         eval_strategy="steps",
         per_device_eval_batch_size=max(
             args.batch // 2,
             1,
         ),
-
         predict_with_generate=True,
         generation_max_length=225,
         generation_num_beams=4,
-
         save_steps=500,
         eval_steps=500,
         logging_steps=50,
-
         save_total_limit=3,
-
         report_to=["tensorboard"],
-
         load_best_model_at_end=True,
         metric_for_best_model="wer",
         greater_is_better=False,
-
         push_to_hub=args.hub_id is not None,
         hub_model_id=args.hub_id,
-
         remove_unused_columns=False,
     )
 
@@ -666,10 +626,7 @@ def main() -> None:
     )
 
     if last_checkpoint:
-        print(
-            f"Resuming full Trainer state from: "
-            f"{last_checkpoint}"
-        )
+        print(f"Resuming full Trainer state from: " f"{last_checkpoint}")
     else:
         print("No checkpoint found. Starting from base model weights.")
 

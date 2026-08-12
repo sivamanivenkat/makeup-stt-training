@@ -2,7 +2,7 @@
 
 Things that broke, why, and how they were fixed — not covered by the design docs
 (`ingestion.md`, `curation.md`, `training.md`, `future_adaptation.md`), which describe how
-the pipeline is *supposed* to work but not what it actually takes to run it on real
+the pipeline is _supposed_ to work but not what it actually takes to run it on real
 infrastructure.
 
 ---
@@ -10,6 +10,7 @@ infrastructure.
 ## 1. yt-dlp environment requirements
 
 ### JS runtime (deno) — required, not optional
+
 yt-dlp now requires a JS runtime to solve YouTube's signature/n-challenge. Without one,
 downloads silently degrade or fail format selection with `HTTP Error 403: Forbidden`, even
 for videos with no bot-check/login issue at all.
@@ -26,6 +27,7 @@ for videos with no bot-check/login issue at all.
   resolving.
 
 ### YouTube authentication — a real login is required
+
 `--cookies-from-browser` only helps if the browser actually has an authenticated Google
 session. An anonymous cookie export (23 cookies, zero `.google.com` domain entries, zero
 `SID`/`SAPISID`/`LOGIN_INFO`) looks superficially fine to yt-dlp but produces
@@ -51,6 +53,7 @@ session. An anonymous cookie export (23 cookies, zero `.google.com` domain entri
   under legacy DPAPI.
 
 ### PO-Token provider (bgutil-ytdlp-pot-provider)
+
 Installed as a defense-in-depth measure but turned out not to be the actual fix for the
 bot-check wall (real login was). Still useful to have wired up:
 
@@ -77,6 +80,7 @@ can't do this:
   though the GPU driver itself is fine (`nvidia-smi` reports CUDA 13.0 driver support).
 
 **Actual workflow:**
+
 1. Finish local download/extraction (`agents/2-extractor.js`) — CPU-only work, fine locally.
 2. Upload `temp/audio/segments/` to Google Drive.
 3. Run `agents/3-transcriber.py` in Colab against the uploaded audio (same script, same
@@ -105,12 +109,12 @@ can't do this:
   JS-runtime issues. Not yet investigated; minority of failures so far (~7% of video-level
   failures in the first 300-video sample).
 - **`[WinError 32] The process cannot access the file because it is being used by another
-  process`** — intermittent file-lock error on `temp/audio/raw/*.wav`, likely a race between
+process`** — intermittent file-lock error on `temp/audio/raw/*.wav`, likely a race between
   ffmpeg finishing and the next step trying to read/delete the same raw file. Not yet fixed.
 - **`TARGET_VIDEOS=1000` in `.env` is stale.** `checkpoints/segments.jsonl` already contains
   the full YouMakeup corpus (1960 videos / 20910 segments) from an earlier discovery run —
   the env var no longer reflects what's actually queued and re-running discovery with it
-  as-is would *shrink* the dataset. Don't rerun `agents/1-discovery.js` without first raising
+  as-is would _shrink_ the dataset. Don't rerun `agents/1-discovery.js` without first raising
   or removing this cap.
 
 ---
@@ -120,14 +124,14 @@ can't do this:
 Pin/record these — this stack breaks on upstream changes fast (yt-dlp added a hard
 JS-runtime requirement between sessions with no prior warning):
 
-| Tool | Version |
-|---|---|
-| yt-dlp | 2026.07.04 |
-| torch | 2.8.0+cpu (no CUDA build installed locally) |
-| deno | 1.3.1 |
-| pywin32 | 312 |
-| pycryptodomex | 3.23.0 |
-| GPU driver | NVIDIA 581.83 (CUDA 13.0 capable, but see local-GPU limits above) |
+| Tool          | Version                                                           |
+| ------------- | ----------------------------------------------------------------- |
+| yt-dlp        | 2026.07.04                                                        |
+| torch         | 2.8.0+cpu (no CUDA build installed locally)                       |
+| deno          | 1.3.1                                                             |
+| pywin32       | 312                                                               |
+| pycryptodomex | 3.23.0                                                            |
+| GPU driver    | NVIDIA 581.83 (CUDA 13.0 capable, but see local-GPU limits above) |
 
 Re-check this table when anything YouTube-download-related breaks again — a yt-dlp/deno
 version bump is the first thing to suspect.
@@ -159,6 +163,6 @@ failures), this is a non-trivial number of API calls. No running cost tally exis
 worth checking OpenAI usage dashboard after the first full `cleanup` phase run and logging
 the actual $ figure here for future budget planning.
 
-| Date | Segments cleaned | Model | Approx cost |
-|---|---|---|---|
-| _(not yet run at full scale)_ | | | |
+| Date                          | Segments cleaned | Model | Approx cost |
+| ----------------------------- | ---------------- | ----- | ----------- |
+| _(not yet run at full scale)_ |                  |       |             |
