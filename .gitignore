@@ -19,3 +19,8 @@ __pycache__/
 deno.exe
 
 *.log
+
+# Claude Code local runtime state
+.claude/
+CLAUDE.md
+SKILL.md
