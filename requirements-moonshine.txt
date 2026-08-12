@@ -1,0 +1,17 @@
+# Extra/overriding deps for train_moonshine.py.
+# Install after requirements.txt:
+#   pip install -r requirements.txt
+#   pip install -r requirements-moonshine.txt
+#
+# transformers==4.46.3 in requirements.txt predates Moonshine support
+# entirely. Kept in a separate file so it doesn't force a transformers
+# upgrade on the WhisperX transcription phase, which is pinned separately.
+#
+# moonshine-streaming-* checkpoints (MoonshineStreamingForConditionalGeneration)
+# need a very recent transformers. If train_moonshine.py raises ImportError
+# on that class, the pinned release below doesn't have it yet — install from
+# git instead:
+#   pip install -U git+https://github.com/huggingface/transformers.git
+
+transformers>=4.48.0
+schedulefree>=1.2.7
