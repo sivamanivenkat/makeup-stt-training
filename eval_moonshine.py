@@ -84,6 +84,17 @@ def main() -> None:
     )
 
     parser.add_argument(
+        "--no-repeat-ngram-size",
+        type=int,
+        default=3,
+        help=(
+            "Blocks exact n-gram repetition during beam search. Prevents "
+            "the decoder looping a phrase instead of emitting EOS on hard "
+            "inputs. Set to 0 to disable and reproduce the raw failure."
+        ),
+    )
+
+    parser.add_argument(
         "--streaming",
         action="store_true",
         help=(
@@ -183,6 +194,7 @@ def main() -> None:
                 **inputs,
                 max_new_tokens=args.max_new_tokens,
                 num_beams=args.num_beams,
+                no_repeat_ngram_size=args.no_repeat_ngram_size or None,
             )
 
         prediction = processor.batch_decode(

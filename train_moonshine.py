@@ -471,6 +471,12 @@ def main() -> None:
     if model.generation_config.pad_token_id is None:
         model.generation_config.pad_token_id = model.config.pad_token_id
 
+    # Blocks exact n-gram repetition during beam search. Without this, hard
+    # or long inputs can make the decoder loop on a repeated phrase instead
+    # of emitting EOS, running out to max_length and wrecking that example's
+    # WER badly enough to skew the whole eval-set metric.
+    model.generation_config.no_repeat_ngram_size = 3
+
     data_collator = DataCollatorMoonshineSeq2SeqWithPadding(
         processor=processor,
         decoder_start_token_id=model.config.decoder_start_token_id,
