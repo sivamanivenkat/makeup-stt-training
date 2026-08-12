@@ -60,6 +60,7 @@ import torch
 from datasets import Audio, load_dataset
 
 from transformers import (
+    AutoConfig,
     AutoProcessor,
     EarlyStoppingCallback,
     MoonshineForConditionalGeneration,
@@ -79,6 +80,53 @@ from train import (
     normalize_text,
     restore_checkpoint_from_backup,
 )
+
+
+def align_tokenizer_special_tokens(tokenizer: Any, model_config: Any) -> None:
+    """Align tokenizer special tokens with IDs already used by the model.
+
+    Some Moonshine checkpoints declare the special-token IDs in config.json,
+    but omit them from the tokenizer metadata. Reusing the tokens at those IDs
+    preserves the pretrained vocabulary and avoids resizing model embeddings.
+    """
+    changed_tokens = []
+
+    for token_name in ("bos_token", "eos_token", "pad_token"):
+        token_id_name = f"{token_name}_id"
+        model_token_id = getattr(model_config, token_id_name, None)
+        tokenizer_token_id = getattr(tokenizer, token_id_name, None)
+
+        if model_token_id is None:
+            if tokenizer_token_id is None:
+                raise ValueError(
+                    f"Neither the model nor tokenizer defines {token_id_name}."
+                )
+            continue
+
+        if tokenizer_token_id == model_token_id:
+            continue
+
+        token = tokenizer.convert_ids_to_tokens(model_token_id)
+
+        if token is None:
+            raise ValueError(
+                f"Model {token_id_name}={model_token_id} does not map to a "
+                "token in the tokenizer vocabulary."
+            )
+
+        setattr(tokenizer, token_name, token)
+
+        if getattr(tokenizer, token_id_name, None) != model_token_id:
+            raise ValueError(
+                f"Could not align tokenizer {token_id_name} with model value "
+                f"{model_token_id}."
+            )
+
+        changed_tokens.append(f"{token_name}={token!r} (id={model_token_id})")
+
+    if changed_tokens:
+        print("Aligned tokenizer special tokens: " + ", ".join(changed_tokens))
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Data collator
@@ -329,6 +377,16 @@ def main() -> None:
     print(f"Loading processor from: {model_source}")
 
     processor = AutoProcessor.from_pretrained(model_source)
+    model_config = AutoConfig.from_pretrained(model_source)
+    align_tokenizer_special_tokens(processor.tokenizer, model_config)
+
+    if processor.tokenizer.pad_token is None:
+        processor.tokenizer.pad_token = processor.tokenizer.eos_token
+        print(
+            f"Tokenizer had no pad_token — reusing eos_token as pad "
+            f"({processor.tokenizer.eos_token!r}, "
+            f"id={processor.tokenizer.eos_token_id})"
+        )
 
     # ─────────────────────────────────────────────────────────────────────────
     # Load dataset
@@ -399,6 +457,7 @@ def main() -> None:
 
     model = model_class.from_pretrained(
         model_source,
+        config=model_config,
         attn_implementation="sdpa",
     )
 
