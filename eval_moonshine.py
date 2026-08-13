@@ -12,8 +12,11 @@ Usage:
 """
 
 import argparse
+import os
+import random
 
 import evaluate
+import soundfile
 import torch
 
 from datasets import Audio, load_dataset
@@ -141,11 +144,31 @@ def main() -> None:
 
     parser.add_argument(
         "--sort",
-        choices=["duration_desc", "duration_asc", "none"],
+        choices=["duration_desc", "duration_asc", "random", "none"],
         default="duration_desc",
         help=(
             "duration_desc (default) samples the longest clips first — the "
-            "case most likely to hit a generation max-length cap."
+            "case most likely to hit a generation max-length cap. Use "
+            "'random' for an unbiased sample when checking label-noise "
+            "floor rather than hunting a specific failure mode."
+        ),
+    )
+
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for --sort random.",
+    )
+
+    parser.add_argument(
+        "--save-audio-dir",
+        default=None,
+        help=(
+            "If set, save each sampled clip as a .wav file here so you can "
+            "listen to it — needed to actually check whether a reference "
+            "transcript is correct, not just whether it matches the "
+            "prediction."
         ),
     )
 
@@ -268,8 +291,13 @@ def main() -> None:
         indices.sort(key=lambda i: durations[i], reverse=True)
     elif args.sort == "duration_asc":
         indices.sort(key=lambda i: durations[i])
+    elif args.sort == "random":
+        random.Random(args.seed).shuffle(indices)
 
     indices = indices[: args.num_examples]
+
+    if args.save_audio_dir:
+        os.makedirs(args.save_audio_dir, exist_ok=True)
 
     print("=" * 100)
     print(
@@ -278,11 +306,18 @@ def main() -> None:
     )
     print("=" * 100)
 
+    saved_audio_paths = []
+
     for rank, index in enumerate(indices, start=1):
         example = dataset[index]
         audio = example["audio"]
         reference = example["transcription"]
         duration = durations[index]
+
+        if args.save_audio_dir:
+            audio_path = os.path.join(args.save_audio_dir, f"{rank:02d}.wav")
+            soundfile.write(audio_path, audio["array"], audio["sampling_rate"])
+            saved_audio_paths.append(audio_path)
 
         inputs = processor(
             audio["array"],
@@ -318,7 +353,24 @@ def main() -> None:
         )
         print(f"    REF:  {reference}")
         print(f"    PRED: {prediction}")
+
+        if args.save_audio_dir:
+            print(f"    AUDIO: {saved_audio_paths[-1]}")
+
         print("-" * 100)
+
+    if saved_audio_paths:
+        print()
+        print(
+            "Paste this in a real notebook cell (not `!python ...`) to "
+            "listen inline, matching each [n] printed above:"
+        )
+        print()
+        print("import glob")
+        print("from IPython.display import Audio, display")
+        print(f"for path in sorted(glob.glob('{args.save_audio_dir}/*.wav')):")
+        print("    print(path)")
+        print("    display(Audio(path))")
 
 
 if __name__ == "__main__":
