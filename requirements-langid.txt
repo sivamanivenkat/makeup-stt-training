@@ -1,0 +1,6 @@
+# Extra dep for detect_language.py only.
+# Deliberately not whisperx (transformers>=4.48 conflict) or bundled into
+# requirements.txt/requirements-moonshine.txt — this is a one-off data
+# audit script, not part of the training pipeline.
+
+faster-whisper>=1.0.0
