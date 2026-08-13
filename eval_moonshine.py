@@ -29,6 +29,86 @@ from train import normalize_text
 from train_moonshine import align_tokenizer_special_tokens
 
 
+def run_full_eval(model, processor, dataset, device, args, wer_metric) -> None:
+    """
+    Batched generation over the entire split, reporting one aggregate WER.
+
+    Comparable to the eval_wer number Seq2SeqTrainer reports during
+    training, but using the fixed generation config (no_repeat_ngram_size),
+    so it reveals how much of the earlier training-time WER was inflated by
+    the repetition-loop bug rather than real transcription quality.
+    """
+    all_predictions = []
+    all_references = []
+
+    num_examples = len(dataset)
+    num_batches = (num_examples + args.batch_size - 1) // args.batch_size
+
+    print("=" * 100)
+    print(
+        f"Full eval: {num_examples} examples, batch_size={args.batch_size}, "
+        f"max_new_tokens={args.max_new_tokens}, num_beams={args.num_beams}, "
+        f"no_repeat_ngram_size={args.no_repeat_ngram_size}"
+    )
+    print("=" * 100)
+
+    for batch_index in range(num_batches):
+        start = batch_index * args.batch_size
+        end = min(start + args.batch_size, num_examples)
+        batch = dataset[start:end]
+
+        input_values = [
+            processor.feature_extractor(
+                audio["array"],
+                sampling_rate=audio["sampling_rate"],
+            ).input_values[0]
+            for audio in batch["audio"]
+        ]
+
+        padded_inputs = processor.feature_extractor.pad(
+            [{"input_values": values} for values in input_values],
+            return_tensors="pt",
+        ).to(device)
+
+        with torch.no_grad():
+            generated_ids = model.generate(
+                **padded_inputs,
+                max_new_tokens=args.max_new_tokens,
+                num_beams=args.num_beams,
+                no_repeat_ngram_size=args.no_repeat_ngram_size or None,
+            )
+
+        predictions = processor.batch_decode(
+            generated_ids,
+            skip_special_tokens=True,
+        )
+
+        all_predictions.extend(normalize_text(text) for text in predictions)
+        all_references.extend(normalize_text(text) for text in batch["transcription"])
+
+        is_last_batch = batch_index == num_batches - 1
+
+        if (batch_index + 1) % 10 == 0 or is_last_batch:
+            running_wer = 100 * wer_metric.compute(
+                predictions=all_predictions,
+                references=all_references,
+            )
+            print(
+                f"  batch {batch_index + 1}/{num_batches}  "
+                f"examples={len(all_references)}  "
+                f"running_wer={running_wer:.2f}%"
+            )
+
+    final_wer = 100 * wer_metric.compute(
+        predictions=all_predictions,
+        references=all_references,
+    )
+
+    print("=" * 100)
+    print(f"FULL VALIDATION WER: {final_wer:.2f}%  ({len(all_references)} examples)")
+    print("=" * 100)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Inspect Moonshine predictions vs. references on real examples."
@@ -103,6 +183,23 @@ def main() -> None:
         ),
     )
 
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help=(
+            "Compute one aggregate WER over the entire split instead of "
+            "printing per-example predictions. Comparable to the eval_wer "
+            "training reports, but with the fixed generation config."
+        ),
+    )
+
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=8,
+        help="Batch size for --full mode.",
+    )
+
     args = parser.parse_args()
 
     is_streaming = args.streaming or "streaming" in args.checkpoint.lower()
@@ -158,6 +255,12 @@ def main() -> None:
 
     dataset = dataset.cast_column("audio", Audio(sampling_rate=16_000))
 
+    wer_metric = evaluate.load("wer")
+
+    if args.full:
+        run_full_eval(model, processor, dataset, device, args, wer_metric)
+        return
+
     durations = [len(row["array"]) / row["sampling_rate"] for row in dataset["audio"]]
     indices = list(range(len(dataset)))
 
@@ -167,8 +270,6 @@ def main() -> None:
         indices.sort(key=lambda i: durations[i])
 
     indices = indices[: args.num_examples]
-
-    wer_metric = evaluate.load("wer")
 
     print("=" * 100)
     print(
