@@ -65,7 +65,7 @@ def main() -> None:
 
     parser.add_argument(
         "--splits",
-        default="train,validation,test",
+        default="train,val,test",
         help="Comma-separated splits to scan. Directory names as on disk.",
     )
 
