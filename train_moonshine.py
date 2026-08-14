@@ -37,6 +37,8 @@ Usage:
 
 import argparse
 import gc
+import json
+import math
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
@@ -543,8 +545,41 @@ def main() -> None:
     )
 
     eval_dataset = dataset["validation"]
+    train_durations = np.array(dataset["train"]["duration"])
 
     for stage_index, cutoff in enumerate(stage_cutoffs, start=1):
+        # Cheap pre-check: if a checkpoint already exists and its global_step
+        # already meets or exceeds what this stage would train to, skip the
+        # (slow) filter and the no-op train() call entirely. Without this,
+        # resuming after all stages already completed re-filters the full
+        # dataset for every earlier stage before Trainer notices there's
+        # nothing left to do for it.
+        resume_checkpoint = get_last_checkpoint(args.output)
+
+        if resume_checkpoint:
+            state_path = os.path.join(resume_checkpoint, "trainer_state.json")
+
+            with open(state_path, "r", encoding="utf-8") as state_file:
+                resumed_global_step = json.load(state_file)["global_step"]
+
+            stage_example_count = (
+                len(dataset["train"])
+                if cutoff is None
+                else int((train_durations <= cutoff).sum())
+            )
+
+            dataloader_len = math.ceil(stage_example_count / args.batch)
+            steps_per_epoch = max(dataloader_len // args.grad_accum, 1)
+            target_steps = math.ceil(steps_per_epoch * epochs_per_stage)
+
+            if resumed_global_step >= target_steps:
+                print(
+                    f"Skipping stage {stage_index}/{len(stage_cutoffs)} "
+                    f"(<= {cutoff}s clips): checkpoint already at step "
+                    f"{resumed_global_step}, stage target is {target_steps}."
+                )
+                continue
+
         if cutoff is None:
             stage_train_dataset = dataset["train"]
             stage_label = "full dataset (no curriculum)"
