@@ -479,6 +479,16 @@ def main() -> None:
     # WER badly enough to skew the whole eval-set metric.
     model.generation_config.no_repeat_ngram_size = 3
 
+    # model.generation_config.max_length ships with a pretrained default
+    # (194 for moonshine-base) that's independent of Seq2SeqTrainingArguments'
+    # generation_max_length below. If left unset, eval-time generation silently
+    # truncates at 194 regardless of what generation_max_length says, which
+    # inflates eval_wer (and corrupts load_best_model_at_end / early stopping,
+    # both keyed on that metric) without raising an error — just a "friendly
+    # reminder" warning easy to miss in a long log.
+    generation_max_length = 225
+    model.generation_config.max_length = generation_max_length
+
     data_collator = DataCollatorMoonshineSeq2SeqWithPadding(
         processor=processor,
         decoder_start_token_id=model.config.decoder_start_token_id,
@@ -614,7 +624,7 @@ def main() -> None:
                 1,
             ),
             predict_with_generate=True,
-            generation_max_length=225,
+            generation_max_length=generation_max_length,
             generation_num_beams=4,
             save_steps=500,
             eval_steps=500,
