@@ -18,6 +18,13 @@ Two signals, since ASR errors come in two different flavors:
     catch them because they encode how the word sounds, not how it's
     spelled.
 
+Operates on character spans of the original string rather than
+tokenize-and-rejoin, so punctuation, digits, and hyphenated words are never
+touched or mis-respaced by a replacement elsewhere in the sentence (an
+earlier tokenize/rejoin version silently corrupted "10" -> "1 0" and
+"double-ended" -> "double- ended" on every single call, regardless of
+whether any vocabulary term matched -- pure WER damage with zero benefit).
+
 Usage (as a library):
     from vocabulary_correct import load_vocabulary, correct_transcript
     vocab = load_vocabulary("./vocabulary.json")
@@ -31,7 +38,7 @@ import jellyfish
 from rapidfuzz import fuzz
 from spellchecker import SpellChecker
 
-WORD_RE = re.compile(r"[A-Za-z']+|[^A-Za-z'\s]")
+WORD_RE = re.compile(r"[A-Za-z']+")
 _SPELLCHECKER = SpellChecker()
 
 
@@ -76,23 +83,24 @@ def correct_transcript(
 ) -> str:
     """
     Slides windows (longest term length first, so multi-word product names
-    take priority over single-word matches) over the tokenized text,
-    replacing a window with a vocabulary term's canonical form when the
-    combined text/phonetic similarity clears the threshold and the window
-    doesn't already read as that term.
+    take priority over single-word matches) over the words found in text,
+    replacing a window's exact character span with a vocabulary term's
+    canonical form when the combined text/phonetic similarity clears the
+    threshold. Everything outside a replaced span -- spacing, punctuation,
+    digits, hyphens -- is copied through unchanged.
 
     min_word_length guards against short common words (e.g. "so", "to")
     matching a vocabulary term by coincidence -- phonetic codes on very
     short words collide easily and the blast radius of a wrong short-word
     replacement is proportionally larger relative to its own length.
     """
-    tokens = WORD_RE.findall(text)
-    word_positions = [i for i, tok in enumerate(tokens) if tok.isalpha() or "'" in tok]
+    matches = list(WORD_RE.finditer(text))
 
-    if not word_positions:
+    if not matches:
         return text
 
-    consumed = [False] * len(tokens)
+    consumed = [False] * len(matches)
+    replacements = {}  # start_match_index -> (end_match_index, replacement_text)
     max_term_length = max(vocabulary.keys()) if vocabulary else 0
 
     for window_size in range(max_term_length, 0, -1):
@@ -101,15 +109,16 @@ def correct_transcript(
         if not candidates:
             continue
 
-        for start_idx in range(len(word_positions) - window_size + 1):
-            positions = word_positions[start_idx : start_idx + window_size]
+        for start_idx in range(len(matches) - window_size + 1):
+            window_matches = matches[start_idx : start_idx + window_size]
+            indices = range(start_idx, start_idx + window_size)
 
-            if any(consumed[p] for p in positions):
+            if any(consumed[i] for i in indices):
                 continue
 
-            window_words = [tokens[p] for p in positions]
+            window_words = [m.group() for m in window_matches]
 
-            if any(len(w) < min_word_length for w in window_words) and window_size == 1:
+            if window_size == 1 and len(window_words[0]) < min_word_length:
                 continue
 
             # Hard gate: only ever consider correcting a window if every word
@@ -138,23 +147,27 @@ def correct_transcript(
                     best_term = term
             else:
                 if best_term is not None and best_score >= threshold:
-                    tokens[positions[0]] = best_term
-                    for p in positions[1:]:
-                        tokens[p] = ""
-                    for p in positions:
-                        consumed[p] = True
+                    replacements[start_idx] = (start_idx + window_size - 1, best_term)
+                    for i in indices:
+                        consumed[i] = True
 
-    corrected_parts = []
+    if not replacements:
+        return text
 
-    for tok in tokens:
-        if tok == "":
-            continue
+    output_parts = []
+    cursor = 0
+    i = 0
 
-        is_word_like = any(c.isalnum() for c in tok)
+    while i < len(matches):
+        if i in replacements:
+            end_idx, replacement_text = replacements[i]
+            output_parts.append(text[cursor : matches[i].start()])
+            output_parts.append(replacement_text)
+            cursor = matches[end_idx].end()
+            i = end_idx + 1
+        else:
+            i += 1
 
-        if corrected_parts and is_word_like:
-            corrected_parts.append(" ")
+    output_parts.append(text[cursor:])
 
-        corrected_parts.append(tok)
-
-    return "".join(corrected_parts)
+    return "".join(output_parts)
