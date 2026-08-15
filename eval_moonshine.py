@@ -43,6 +43,15 @@ def build_sequence_bias(processor: Any, vocab_bias_file: str, weight: float) -> 
 
     Encodes each term with a leading space, since that's how it almost
     always appears mid-sentence (the common case) under a BPE tokenizer.
+
+    SequenceBiasLogitsProcessor only boosts the LAST token of a biased
+    sequence, and only once every preceding token in that sequence has
+    already been generated verbatim -- it never nudges the first token of
+    a multi-token phrase. Biasing only the full term is therefore a no-op
+    for exactly the failure mode this is meant to fix (first-token
+    divergence, e.g. "Kajal" generated as "pajole"). Adding every prefix
+    of the token sequence makes each step of the phrase -- including the
+    first token -- eligible for a boost.
     """
     with open(vocab_bias_file, "r", encoding="utf-8") as f:
         terms = json.load(f)
@@ -51,10 +60,11 @@ def build_sequence_bias(processor: Any, vocab_bias_file: str, weight: float) -> 
 
     for item in terms:
         term = item["term"] if isinstance(item, dict) else item
-        token_ids = tuple(processor.tokenizer.encode(" " + term, add_special_tokens=False))
+        token_ids = processor.tokenizer.encode(" " + term, add_special_tokens=False)
 
-        if token_ids:
-            sequence_bias[token_ids] = weight
+        for prefix_length in range(1, len(token_ids) + 1):
+            prefix = tuple(token_ids[:prefix_length])
+            sequence_bias[prefix] = weight
 
     return sequence_bias
 
