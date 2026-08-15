@@ -12,8 +12,10 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import random
+from typing import Any, Dict, Tuple
 
 import evaluate
 import soundfile
@@ -32,7 +34,32 @@ from train import normalize_text
 from train_moonshine import align_tokenizer_special_tokens
 
 
-def run_full_eval(model, processor, dataset, device, args, wer_metric) -> None:
+def build_sequence_bias(processor: Any, vocab_bias_file: str, weight: float) -> Dict[Tuple[int, ...], float]:
+    """
+    Turn a domain vocabulary list (build_vocabulary.py output) into a
+    sequence_bias dict for model.generate(), nudging the decoder toward
+    brand/product/technique terms it otherwise under-produces because
+    they're rare in training data relative to common words.
+
+    Encodes each term with a leading space, since that's how it almost
+    always appears mid-sentence (the common case) under a BPE tokenizer.
+    """
+    with open(vocab_bias_file, "r", encoding="utf-8") as f:
+        terms = json.load(f)
+
+    sequence_bias: Dict[Tuple[int, ...], float] = {}
+
+    for item in terms:
+        term = item["term"] if isinstance(item, dict) else item
+        token_ids = tuple(processor.tokenizer.encode(" " + term, add_special_tokens=False))
+
+        if token_ids:
+            sequence_bias[token_ids] = weight
+
+    return sequence_bias
+
+
+def run_full_eval(model, processor, dataset, device, args, wer_metric, sequence_bias=None) -> None:
     """
     Batched generation over the entire split, reporting one aggregate WER.
 
@@ -79,6 +106,7 @@ def run_full_eval(model, processor, dataset, device, args, wer_metric) -> None:
                 max_new_tokens=args.max_new_tokens,
                 num_beams=args.num_beams,
                 no_repeat_ngram_size=args.no_repeat_ngram_size or None,
+                sequence_bias=sequence_bias,
             )
 
         predictions = processor.batch_decode(
@@ -223,6 +251,24 @@ def main() -> None:
         help="Batch size for --full mode.",
     )
 
+    parser.add_argument(
+        "--vocab-bias-file",
+        default=None,
+        help=(
+            "Path to a build_vocabulary.py output (JSON list of domain "
+            "terms). Nudges generation toward brand/product/technique "
+            "words that are rare in training data and otherwise get "
+            "mis-transcribed, without hard-forcing them."
+        ),
+    )
+
+    parser.add_argument(
+        "--vocab-bias-weight",
+        type=float,
+        default=4.0,
+        help="Logit bias added for each vocabulary term. Higher = stronger nudge.",
+    )
+
     args = parser.parse_args()
 
     is_streaming = args.streaming or "streaming" in args.checkpoint.lower()
@@ -263,6 +309,12 @@ def main() -> None:
 
     model.eval()
 
+    sequence_bias = None
+
+    if args.vocab_bias_file:
+        sequence_bias = build_sequence_bias(processor, args.vocab_bias_file, args.vocab_bias_weight)
+        print(f"Loaded {len(sequence_bias)} vocabulary bias terms from {args.vocab_bias_file}")
+
     print(f"Loading dataset split '{args.split}' from: {args.dataset}")
 
     raw_dataset = load_dataset("audiofolder", data_dir=args.dataset)
@@ -281,7 +333,7 @@ def main() -> None:
     wer_metric = evaluate.load("wer")
 
     if args.full:
-        run_full_eval(model, processor, dataset, device, args, wer_metric)
+        run_full_eval(model, processor, dataset, device, args, wer_metric, sequence_bias)
         return
 
     durations = [len(row["array"]) / row["sampling_rate"] for row in dataset["audio"]]
@@ -331,6 +383,7 @@ def main() -> None:
                 max_new_tokens=args.max_new_tokens,
                 num_beams=args.num_beams,
                 no_repeat_ngram_size=args.no_repeat_ngram_size or None,
+                sequence_bias=sequence_bias,
             )
 
         prediction = processor.batch_decode(
