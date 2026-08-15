@@ -12,10 +12,8 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import random
-from typing import Any, Dict, Tuple
 
 import evaluate
 import soundfile
@@ -32,44 +30,10 @@ except ImportError:
 
 from train import normalize_text
 from train_moonshine import align_tokenizer_special_tokens
+from vocabulary_correct import correct_transcript, load_vocabulary
 
 
-def build_sequence_bias(processor: Any, vocab_bias_file: str, weight: float) -> Dict[Tuple[int, ...], float]:
-    """
-    Turn a domain vocabulary list (build_vocabulary.py output) into a
-    sequence_bias dict for model.generate(), nudging the decoder toward
-    brand/product/technique terms it otherwise under-produces because
-    they're rare in training data relative to common words.
-
-    Encodes each term with a leading space, since that's how it almost
-    always appears mid-sentence (the common case) under a BPE tokenizer.
-
-    SequenceBiasLogitsProcessor only boosts the LAST token of a biased
-    sequence, and only once every preceding token in that sequence has
-    already been generated verbatim -- it never nudges the first token of
-    a multi-token phrase. Biasing only the full term is therefore a no-op
-    for exactly the failure mode this is meant to fix (first-token
-    divergence, e.g. "Kajal" generated as "pajole"). Adding every prefix
-    of the token sequence makes each step of the phrase -- including the
-    first token -- eligible for a boost.
-    """
-    with open(vocab_bias_file, "r", encoding="utf-8") as f:
-        terms = json.load(f)
-
-    sequence_bias: Dict[Tuple[int, ...], float] = {}
-
-    for item in terms:
-        term = item["term"] if isinstance(item, dict) else item
-        token_ids = processor.tokenizer.encode(" " + term, add_special_tokens=False)
-
-        for prefix_length in range(1, len(token_ids) + 1):
-            prefix = tuple(token_ids[:prefix_length])
-            sequence_bias[prefix] = weight
-
-    return sequence_bias
-
-
-def run_full_eval(model, processor, dataset, device, args, wer_metric, sequence_bias=None) -> None:
+def run_full_eval(model, processor, dataset, device, args, wer_metric, vocabulary=None) -> None:
     """
     Batched generation over the entire split, reporting one aggregate WER.
 
@@ -116,13 +80,15 @@ def run_full_eval(model, processor, dataset, device, args, wer_metric, sequence_
                 max_new_tokens=args.max_new_tokens,
                 num_beams=args.num_beams,
                 no_repeat_ngram_size=args.no_repeat_ngram_size or None,
-                sequence_bias=sequence_bias,
             )
 
         predictions = processor.batch_decode(
             generated_ids,
             skip_special_tokens=True,
         )
+
+        if vocabulary:
+            predictions = [correct_transcript(text, vocabulary) for text in predictions]
 
         all_predictions.extend(normalize_text(text) for text in predictions)
         all_references.extend(normalize_text(text) for text in batch["transcription"])
@@ -262,21 +228,16 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--vocab-bias-file",
+        "--vocab-correct-file",
         default=None,
         help=(
             "Path to a build_vocabulary.py output (JSON list of domain "
-            "terms). Nudges generation toward brand/product/technique "
-            "words that are rare in training data and otherwise get "
-            "mis-transcribed, without hard-forcing them."
+            "terms). Post-processing correction: replaces gibberish ASR "
+            "output (words not in a standard English dictionary) with a "
+            "confidently-matching brand/product/technique term, when one "
+            "exists. Never touches valid English words, so it can't "
+            "introduce new errors the way generation-time biasing did."
         ),
-    )
-
-    parser.add_argument(
-        "--vocab-bias-weight",
-        type=float,
-        default=4.0,
-        help="Logit bias added for each vocabulary term. Higher = stronger nudge.",
     )
 
     args = parser.parse_args()
@@ -319,11 +280,12 @@ def main() -> None:
 
     model.eval()
 
-    sequence_bias = None
+    vocabulary = None
 
-    if args.vocab_bias_file:
-        sequence_bias = build_sequence_bias(processor, args.vocab_bias_file, args.vocab_bias_weight)
-        print(f"Loaded {len(sequence_bias)} vocabulary bias terms from {args.vocab_bias_file}")
+    if args.vocab_correct_file:
+        vocabulary = load_vocabulary(args.vocab_correct_file)
+        term_count = sum(len(v) for v in vocabulary.values())
+        print(f"Loaded {term_count} vocabulary correction terms from {args.vocab_correct_file}")
 
     print(f"Loading dataset split '{args.split}' from: {args.dataset}")
 
@@ -343,7 +305,7 @@ def main() -> None:
     wer_metric = evaluate.load("wer")
 
     if args.full:
-        run_full_eval(model, processor, dataset, device, args, wer_metric, sequence_bias)
+        run_full_eval(model, processor, dataset, device, args, wer_metric, vocabulary)
         return
 
     durations = [len(row["array"]) / row["sampling_rate"] for row in dataset["audio"]]
@@ -393,13 +355,15 @@ def main() -> None:
                 max_new_tokens=args.max_new_tokens,
                 num_beams=args.num_beams,
                 no_repeat_ngram_size=args.no_repeat_ngram_size or None,
-                sequence_bias=sequence_bias,
             )
 
         prediction = processor.batch_decode(
             generated_ids,
             skip_special_tokens=True,
         )[0]
+
+        if vocabulary:
+            prediction = correct_transcript(prediction, vocabulary)
 
         generated_length = generated_ids.shape[-1]
         hit_cap = generated_length >= args.max_new_tokens

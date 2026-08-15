@@ -28,6 +28,22 @@ SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 CONNECTOR_WORDS = {"of", "the", "and", "by", "for", "de", "&"}
 STOPWORDS = {"i", "i'm", "i've", "i'll", "i'd"}
 
+# Common technique/product-type words that matter for a makeup-tutorial
+# transcript but aren't proper nouns, so the capitalization-based extraction
+# above won't reliably surface them (they're lowercase in normal usage and
+# some, like "Kajal", only ever appear embedded inside a specific product
+# name in this corpus, never standalone). Always included regardless of
+# corpus frequency.
+CURATED_TECHNIQUE_TERMS = [
+    "translucent", "Kajal", "waterline", "crease", "contour", "contouring",
+    "concealer", "foundation", "primer", "mascara", "eyeliner", "eyeshadow",
+    "eyebrow", "eyelid", "eyelash", "eyelashes", "bronzer", "blush",
+    "highlighter", "setting spray", "lash line", "sponge", "blending",
+    "buffing", "baking", "strobing", "cut crease", "smokey eye", "ombre",
+    "matte", "dewy", "shimmer", "glitter", "pigment", "palette", "swatch",
+    "undertone", "color correcting",
+]
+
 
 def strip_punctuation(word: str) -> str:
     return word.strip(".,!?;:\"'()")
@@ -104,7 +120,7 @@ def main() -> None:
         "--max-terms",
         type=int,
         default=300,
-        help="Cap the vocabulary size, keeping the most frequent terms.",
+        help="Cap the vocabulary size, keeping the most frequent terms. Curated terms are always kept regardless of this cap.",
     )
     parser.add_argument("--output", default="./vocabulary.json")
 
@@ -133,14 +149,24 @@ def main() -> None:
                 for phrase in extract_phrases(transcription):
                     counts[phrase] += 1
 
-    filtered = [
+    curated_lower = {t.lower() for t in CURATED_TECHNIQUE_TERMS}
+
+    extracted = [
         {"term": term, "count": count}
         for term, count in counts.items()
-        if count >= args.min_count
+        if count >= args.min_count and term.lower() not in curated_lower
     ]
 
+    extracted.sort(key=lambda item: item["count"], reverse=True)
+    extracted = extracted[: args.max_terms]
+
+    curated = [
+        {"term": term, "count": counts.get(term, 0)}
+        for term in CURATED_TECHNIQUE_TERMS
+    ]
+
+    filtered = curated + extracted
     filtered.sort(key=lambda item: item["count"], reverse=True)
-    filtered = filtered[: args.max_terms]
 
     with open(args.output, "w", encoding="utf-8") as output_file:
         json.dump(filtered, output_file, indent=2)
