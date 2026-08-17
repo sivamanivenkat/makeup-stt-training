@@ -79,6 +79,7 @@ def correct_transcript(
     text: str,
     vocabulary: dict,
     threshold: float = 88.0,
+    multi_word_threshold: float = 80.0,
     min_word_length: int = 4,
 ) -> str:
     """
@@ -88,6 +89,11 @@ def correct_transcript(
     canonical form when the combined text/phonetic similarity clears the
     threshold. Everything outside a replaced span -- spacing, punctuation,
     digits, hyphens -- is copied through unchanged.
+
+    multi_word_threshold is lower than the single-word threshold: matching
+    TWO (or more) words' combined text/phonetic signature by pure
+    coincidence is far rarer than a single short word colliding with some
+    vocabulary entry, so multi-word windows can safely use a looser bar.
 
     min_word_length guards against short common words (e.g. "so", "to")
     matching a vocabulary term by coincidence -- phonetic codes on very
@@ -146,7 +152,9 @@ def correct_transcript(
                     best_score = score
                     best_term = term
             else:
-                if best_term is not None and best_score >= threshold:
+                effective_threshold = threshold if window_size == 1 else multi_word_threshold
+
+                if best_term is not None and best_score >= effective_threshold:
                     replacements[start_idx] = (start_idx + window_size - 1, best_term)
                     for i in indices:
                         consumed[i] = True
