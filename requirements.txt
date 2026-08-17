@@ -1,7 +1,7 @@
 git+https://github.com/m-bain/whisperX.git
 torch>=2.0.0
 torchaudio>=2.0.0
-transformers==4.46.3
+transformers>=4.48.0
 datasets>=2.18.0
 evaluate>=0.4.1
 jiwer>=3.0.4
