@@ -78,6 +78,30 @@ def main():
         "--device", default="cuda" if torch.cuda.is_available() else "cpu"
     )
     parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument(
+        "--vad-offset",
+        type=float,
+        default=0.25,
+        help=(
+            "WhisperX VAD offset -- lower values keep a speech segment open "
+            "longer as volume trails off before cutting it, instead of "
+            "clipping quiet trailing words (e.g. a trailing 'so...' getting "
+            "dropped from the transcript even though it's clearly audible). "
+            "WhisperX default is ~0.363."
+        ),
+    )
+    parser.add_argument(
+        "--hallucination-silence-threshold",
+        type=float,
+        default=2.0,
+        help=(
+            "Seconds of silence past which faster-whisper skips generating "
+            "text rather than continuing to decode -- reduces the model "
+            "fabricating plausible-sounding words during trailing silence "
+            "(observed: a segment's reference contained a word never "
+            "actually spoken, appended right at a quiet segment ending)."
+        ),
+    )
     args = parser.parse_args()
 
     compute_type = "float16" if args.device == "cuda" else "int8"
@@ -104,7 +128,19 @@ def main():
         return
 
     print("[transcriber] Loading WhisperX model...", flush=True)
-    model = whisperx.load_model(args.model, args.device, compute_type=compute_type)
+    model = whisperx.load_model(
+        args.model,
+        args.device,
+        compute_type=compute_type,
+        asr_options={
+            # Reduces hallucination cascades: conditioning on the model's
+            # own previous (possibly wrong) output can snowball into
+            # fabricated text, especially near trailing silence.
+            "condition_on_previous_text": False,
+            "hallucination_silence_threshold": args.hallucination_silence_threshold,
+        },
+        vad_options={"vad_offset": args.vad_offset},
+    )
     align_model, align_metadata = whisperx.load_align_model(
         language_code="en", device=args.device
     )
