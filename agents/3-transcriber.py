@@ -34,7 +34,36 @@ def load_done(output_path):
     return done
 
 
-def transcribe_segment(model, align_model, align_metadata, entry, device, batch_size):
+def trim_trailing_hallucination(words, raw_text, score_threshold):
+    """Drop a trailing run of low-alignment-confidence words.
+
+    Whisper hallucinates fabricated words during trailing silence; those
+    words reliably align with poor confidence scores, so a contiguous
+    low-score run at the very end of the segment is dropped. Mid-transcript
+    low-confidence words (e.g. brand names, technical terms) are left alone.
+    """
+    if not words:
+        return words, raw_text
+
+    trim_count = 0
+    for w in reversed(words):
+        if (w.get("score", 0) or 0) < score_threshold:
+            trim_count += 1
+        else:
+            break
+
+    if trim_count == 0:
+        return words, raw_text
+
+    trimmed_words = words[: len(words) - trim_count]
+    tokens = raw_text.split()
+    trimmed_text = " ".join(tokens[: len(tokens) - trim_count]) if trim_count < len(tokens) else ""
+    return trimmed_words, trimmed_text
+
+
+def transcribe_segment(
+    model, align_model, align_metadata, entry, device, batch_size, trailing_confidence_threshold
+):
     audio = whisperx.load_audio(entry["wavPath"])
     result = model.transcribe(audio, batch_size=batch_size, language="en")
 
@@ -61,6 +90,10 @@ def transcribe_segment(model, align_model, align_metadata, entry, device, batch_
         for seg in aligned.get("segments", [])
         for w in seg.get("words", [])
     ]
+
+    words, raw_text = trim_trailing_hallucination(
+        words, raw_text.strip(), trailing_confidence_threshold
+    )
 
     return {
         "raw_text": raw_text.strip(),
@@ -102,6 +135,15 @@ def main():
             "actually spoken, appended right at a quiet segment ending)."
         ),
     )
+    parser.add_argument(
+        "--trailing-confidence-threshold",
+        type=float,
+        default=0.3,
+        help=(
+            "Word-alignment confidence score below which a trailing word "
+            "run is dropped as hallucinated (see trim_trailing_hallucination)."
+        ),
+    )
     args = parser.parse_args()
 
     compute_type = "float16" if args.device == "cuda" else "int8"
@@ -138,6 +180,10 @@ def main():
             # fabricated text, especially near trailing silence.
             "condition_on_previous_text": False,
             "hallucination_silence_threshold": args.hallucination_silence_threshold,
+            # Disable the temperature-fallback ladder (faster-whisper retries
+            # at higher temperatures when confidence is low) -- higher
+            # temperatures are exactly where fabricated text gets sampled in.
+            "temperatures": [0.0],
         },
         vad_options={"vad_offset": args.vad_offset},
     )
@@ -159,6 +205,7 @@ def main():
                     entry,
                     args.device,
                     args.batch_size,
+                    args.trailing_confidence_threshold,
                 )
                 record = {
                     "segment_id": entry["segmentId"],

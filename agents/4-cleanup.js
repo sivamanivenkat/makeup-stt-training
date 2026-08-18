@@ -5,10 +5,17 @@ import { log } from "../utils/logger.js";
 import { withRetry } from "../utils/retry.js";
 import * as checkpoint from "../utils/checkpoint.js";
 
-const client = new OpenAI();
 const CKPT_DIR = process.env.CHECKPOINT_DIR || "./checkpoints";
 const CONCURRENCY = 5;
 const MODEL = process.env.OPENAI_CLEANUP_MODEL || "gpt-4o-mini";
+
+let client;
+function getClient() {
+  // Constructed lazily so other phases (e.g. transcribe) can import this
+  // module without OPENAI_API_KEY being set — it's only needed at cleanup time.
+  if (!client) client = new OpenAI();
+  return client;
+}
 
 const SYSTEM_PROMPT = `You are a makeup tutorial speech-to-text correction assistant.
 You receive a raw ASR transcript from a makeup tutorial video segment and return the corrected version.
@@ -41,7 +48,7 @@ Facial area: ${(entry.area || []).join(", ")}
 Raw ASR transcript:
 ${entry.raw_text}`;
 
-  const msg = await client.chat.completions.create({
+  const msg = await getClient().chat.completions.create({
     model: MODEL,
     max_tokens: 512,
     messages: [
