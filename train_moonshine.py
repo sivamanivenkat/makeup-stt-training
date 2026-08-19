@@ -595,7 +595,8 @@ def main() -> None:
             stage_label = "full dataset (no curriculum)"
         else:
             stage_train_dataset = dataset["train"].filter(
-                lambda example: example["duration"] <= cutoff,
+                lambda duration: duration <= cutoff,
+                input_columns=["duration"],
                 desc=f"Filtering stage {stage_index} (<= {cutoff}s)",
             )
             stage_label = f"<= {cutoff}s clips"
