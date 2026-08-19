@@ -119,18 +119,26 @@ async function phasePackage() {
       if (!transcription.trim()) continue; // VAD/ASR misfire, not a genuinely silent clip — don't train on it
 
       const destName = `${entry.segment_id}.wav`;
-      const srcPath = path.join(
-        process.env.AUDIO_DIR || "./temp/audio",
-        "segments",
-        destName,
-      );
-      if (!fs.existsSync(srcPath)) continue;
-
       const destPath = path.join(audioDir, destName);
 
       if (!fs.existsSync(destPath)) {
+        // Falls back to temp/audio/segments/ only when the dataset doesn't
+        // already have this file (e.g. a from-scratch download run) --
+        // re-transcription workflows read audio straight from dataset/
+        // and never touch temp/audio/segments/, so destPath already
+        // existing is the common case here.
+        const srcPath = path.join(
+          process.env.AUDIO_DIR || "./temp/audio",
+          "segments",
+          destName,
+        );
+        if (!fs.existsSync(srcPath)) continue;
         fs.copyFileSync(srcPath, destPath);
       }
+
+      const area = Array.isArray(entry.area)
+        ? entry.area.join(", ")
+        : entry.area || "";
 
       metaLines.push(
         JSON.stringify({
@@ -138,7 +146,7 @@ async function phasePackage() {
           transcription: entry.clean_text || entry.raw_text || "",
           segment_id: entry.segment_id,
           video_id: entry.video_id,
-          area: (entry.area || []).join(", "),
+          area,
           caption: entry.caption || "",
         }),
       );

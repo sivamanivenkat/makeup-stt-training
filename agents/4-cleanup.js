@@ -6,14 +6,21 @@ import { withRetry } from "../utils/retry.js";
 import * as checkpoint from "../utils/checkpoint.js";
 
 const CKPT_DIR = process.env.CHECKPOINT_DIR || "./checkpoints";
-const CONCURRENCY = 5;
+const CONCURRENCY = parseInt(process.env.CLEANUP_CONCURRENCY || "5", 10);
 const MODEL = process.env.OPENAI_CLEANUP_MODEL || "gpt-4o-mini";
 
 let client;
 function getClient() {
   // Constructed lazily so other phases (e.g. transcribe) can import this
   // module without OPENAI_API_KEY being set — it's only needed at cleanup time.
-  if (!client) client = new OpenAI();
+  // CLEANUP_BASE_URL/CLEANUP_API_KEY let this point at any OpenAI-compatible
+  // endpoint (e.g. Groq) instead of OpenAI itself.
+  if (!client) {
+    client = new OpenAI({
+      baseURL: process.env.CLEANUP_BASE_URL || undefined,
+      apiKey: process.env.CLEANUP_API_KEY || process.env.OPENAI_API_KEY,
+    });
+  }
   return client;
 }
 
@@ -39,11 +46,16 @@ Rules:
 3. If the transcript is empty or unintelligible, return an empty string
 4. Return ONLY the corrected transcript text with no commentary or explanation`;
 
+function formatArea(area) {
+  if (Array.isArray(area)) return area.join(", ");
+  return area || "";
+}
+
 async function cleanOne(entry) {
   if (!entry.raw_text?.trim()) return "";
 
   const userPrompt = `Step context: ${entry.caption}
-Facial area: ${(entry.area || []).join(", ")}
+Facial area: ${formatArea(entry.area)}
 
 Raw ASR transcript:
 ${entry.raw_text}`;
