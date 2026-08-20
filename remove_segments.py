@@ -19,7 +19,15 @@ from datasets import load_dataset
 def main() -> None:
     parser = argparse.ArgumentParser(description="Remove segments by dataset row index.")
     parser.add_argument("--dataset", default="./dataset", help="Dataset directory in audiofolder format.")
-    parser.add_argument("--split", required=True, help="Split to remove from (e.g. val, train).")
+    parser.add_argument(
+        "--split",
+        required=True,
+        help=(
+            "Folder name under --dataset to remove from (e.g. val, train). "
+            "audiofolder maps a 'val' folder to a 'validation' dataset key; "
+            "this script looks up rows under that key automatically."
+        ),
+    )
     parser.add_argument("--indices", required=True, help="Comma-separated row indices within --split to drop.")
     parser.add_argument(
         "--cleaned",
@@ -31,7 +39,13 @@ def main() -> None:
     indices = [int(i) for i in args.indices.split(",")]
 
     raw_dataset = load_dataset("audiofolder", data_dir=args.dataset)
-    dataset = raw_dataset[args.split]
+
+    if args.split in raw_dataset:
+        dataset = raw_dataset[args.split]
+    elif args.split == "val" and "validation" in raw_dataset:
+        dataset = raw_dataset["validation"]
+    else:
+        raise KeyError(f"'{args.split}' not found in dataset splits: {list(raw_dataset.keys())}")
 
     segment_ids = {dataset[i]["segment_id"] for i in indices}
     print(f"Dropping {len(segment_ids)} segment(s): {sorted(segment_ids)}")
