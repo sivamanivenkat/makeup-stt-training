@@ -67,6 +67,7 @@ def normalize_text(text: str) -> str:
     """
     text = text.lower()
     text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"\balright\b", "all right", text)
     text = re.sub(r"\s+", " ", text)
 
     return text.strip()
