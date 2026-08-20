@@ -45,9 +45,12 @@ def main() -> None:
                 continue
             audio_path = os.path.join(split_dir, entry["file_name"])
             try:
-                # Header-only check (fast) -- catches missing, truncated, and
-                # corrupt files, unlike a plain os.path.exists/getsize check.
-                sf.info(audio_path)
+                # Full decode, not sf.info() -- a file truncated mid-write by
+                # an interrupted unzip can have a valid header (info() passes)
+                # while the actual audio data is short/corrupt (read() fails).
+                # moonshine-voice's own loader calls sf.read(), so this needs
+                # to match or it won't catch what actually crashes training.
+                sf.read(audio_path, dtype="float32")
             except Exception:
                 skipped_missing += 1
                 continue
