@@ -3,9 +3,12 @@ Convert a packaged dataset split's metadata.jsonl into the {audio, text}
 manifest format expected by `moonshine-voice lora --train-manifest` /
 `--eval-manifest`.
 
-Field names only change here (file_name -> audio, transcription -> text);
-the audio path stays relative to the split directory, so pass
-`--data-root ./dataset/<split>` to the lora CLI to match.
+Audio paths are written out absolute, so the manifest is self-contained
+and `--data-root` doesn't matter to the lora CLI. This matters because
+that CLI resolves BOTH --train-manifest and --eval-manifest paths
+against the SAME single --data-root flag -- with split-relative paths,
+whichever split wasn't passed as --data-root resolves into the wrong
+folder and silently opens unrelated/garbage files instead of erroring.
 
 Usage:
     python build_lora_manifest.py --dataset ./dataset --split train --output checkpoints/lora_train_manifest.jsonl
@@ -17,14 +20,6 @@ import json
 import os
 
 import soundfile as sf
-
-# Reproducibly crashes moonshine-voice lora's loader (soundfile.LibsndfileError:
-# "System error" at open time) despite reading fine in every local check here --
-# unexplained, environment-specific flakiness rather than a real corrupt file.
-# Hard-excluded rather than spending more time chasing one row out of 13k+.
-_KNOWN_BAD_FILES = {
-    "audio/az8Tzf4OyJY_step2.wav",
-}
 
 
 def main() -> None:
@@ -45,17 +40,13 @@ def main() -> None:
     written = 0
     skipped_empty = 0
     skipped_missing = 0
-    skipped_known_bad = 0
     with open(args.output, "w", encoding="utf-8") as f:
         for entry in lines:
             text = (entry.get("transcription") or "").strip()
             if not text:
                 skipped_empty += 1
                 continue
-            if entry["file_name"] in _KNOWN_BAD_FILES:
-                skipped_known_bad += 1
-                continue
-            audio_path = os.path.join(split_dir, entry["file_name"])
+            audio_path = os.path.abspath(os.path.join(split_dir, entry["file_name"]))
             try:
                 # Full decode, not sf.info() -- a file truncated mid-write by
                 # an interrupted unzip can have a valid header (info() passes)
@@ -66,15 +57,13 @@ def main() -> None:
             except Exception:
                 skipped_missing += 1
                 continue
-            f.write(json.dumps({"audio": entry["file_name"], "text": text}) + "\n")
+            f.write(json.dumps({"audio": audio_path, "text": text}) + "\n")
             written += 1
 
     print(
         f"{args.output}: wrote {written} rows "
-        f"(skipped {skipped_empty} empty, {skipped_missing} unreadable audio, "
-        f"{skipped_known_bad} known-bad)"
+        f"(skipped {skipped_empty} empty, {skipped_missing} unreadable audio)"
     )
-    print(f"Pass --data-root {os.path.join(args.dataset, args.split)} to moonshine-voice lora")
 
 
 if __name__ == "__main__":
