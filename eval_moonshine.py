@@ -116,6 +116,68 @@ def run_full_eval(model, processor, dataset, device, args, wer_metric, vocabular
     print("=" * 100)
 
 
+def scan_worst_examples(model, processor, dataset, device, args, wer_metric, vocabulary=None):
+    """
+    Batched inference over the entire split, returning the num_examples
+    worst-scoring examples by per-example WER. Used to find label noise
+    (bad reference transcripts) rather than model failures, since a
+    consistently-wrong-but-fluent prediction against a bad label often
+    scores as a high-WER "failure" that's actually the model being right.
+    """
+    num_examples = len(dataset)
+    num_batches = (num_examples + args.batch_size - 1) // args.batch_size
+
+    scored = []
+
+    print("=" * 100)
+    print(f"Scanning {num_examples} examples for worst per-example WER...")
+    print("=" * 100)
+
+    for batch_index in range(num_batches):
+        start = batch_index * args.batch_size
+        end = min(start + args.batch_size, num_examples)
+        batch = dataset[start:end]
+
+        input_values = [
+            processor.feature_extractor(
+                audio["array"],
+                sampling_rate=audio["sampling_rate"],
+            ).input_values[0]
+            for audio in batch["audio"]
+        ]
+
+        padded_inputs = processor.feature_extractor.pad(
+            [{"input_values": values} for values in input_values],
+            return_tensors="pt",
+        ).to(device)
+
+        with torch.no_grad():
+            generated_ids = model.generate(
+                **padded_inputs,
+                max_new_tokens=args.max_new_tokens,
+                num_beams=args.num_beams,
+                no_repeat_ngram_size=args.no_repeat_ngram_size or None,
+            )
+
+        predictions = processor.batch_decode(generated_ids, skip_special_tokens=True)
+
+        if vocabulary:
+            predictions = [correct_transcript(text, vocabulary) for text in predictions]
+
+        for offset, (prediction, reference) in enumerate(zip(predictions, batch["transcription"])):
+            index = start + offset
+            pred_norm = normalize_text(prediction)
+            ref_norm = normalize_text(reference)
+            example_wer = 100 * wer_metric.compute(predictions=[pred_norm], references=[ref_norm])
+            scored.append((index, example_wer, prediction, reference))
+
+        if (batch_index + 1) % 10 == 0 or batch_index == num_batches - 1:
+            print(f"  scanned {end}/{num_examples}")
+
+    scored.sort(key=lambda row: row[1], reverse=True)
+    return scored[: args.num_examples]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Inspect Moonshine predictions vs. references on real examples."
@@ -148,13 +210,15 @@ def main() -> None:
 
     parser.add_argument(
         "--sort",
-        choices=["duration_desc", "duration_asc", "random", "none"],
+        choices=["duration_desc", "duration_asc", "random", "wer_desc", "none"],
         default="duration_desc",
         help=(
             "duration_desc (default) samples the longest clips first — the "
             "case most likely to hit a generation max-length cap. Use "
             "'random' for an unbiased sample when checking label-noise "
-            "floor rather than hunting a specific failure mode."
+            "floor rather than hunting a specific failure mode. Use "
+            "'wer_desc' to surface the worst-scoring examples across the "
+            "whole split, e.g. for a label-quality audit."
         ),
     )
 
@@ -306,6 +370,47 @@ def main() -> None:
 
     if args.full:
         run_full_eval(model, processor, dataset, device, args, wer_metric, vocabulary)
+        return
+
+    if args.sort == "wer_desc":
+        worst = scan_worst_examples(model, processor, dataset, device, args, wer_metric, vocabulary)
+
+        if args.save_audio_dir:
+            os.makedirs(args.save_audio_dir, exist_ok=True)
+
+        print("=" * 100)
+        print(f"{len(worst)} worst examples by per-example WER")
+        print("=" * 100)
+
+        saved_audio_paths = []
+
+        for rank, (index, example_wer, prediction, reference) in enumerate(worst, start=1):
+            print(f"[{rank}] index={index}  wer={example_wer:.1f}%")
+            print(f"    REF:  {reference}")
+            print(f"    PRED: {prediction}")
+
+            if args.save_audio_dir:
+                audio = dataset[index]["audio"]
+                audio_path = os.path.join(args.save_audio_dir, f"{rank:02d}.wav")
+                soundfile.write(audio_path, audio["array"], audio["sampling_rate"])
+                saved_audio_paths.append(audio_path)
+                print(f"    AUDIO: {audio_path}")
+
+            print("-" * 100)
+
+        if saved_audio_paths:
+            print()
+            print(
+                "Paste this in a real notebook cell (not `!python ...`) to "
+                "listen inline, matching each [n] printed above:"
+            )
+            print()
+            print("import glob")
+            print("from IPython.display import Audio, display")
+            print(f"for path in sorted(glob.glob('{args.save_audio_dir}/*.wav')):")
+            print("    print(path)")
+            print("    display(Audio(path))")
+
         return
 
     durations = [len(row["array"]) / row["sampling_rate"] for row in dataset["audio"]]
