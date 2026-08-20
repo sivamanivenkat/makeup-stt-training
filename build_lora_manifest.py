@@ -30,16 +30,28 @@ def main() -> None:
 
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
 
+    split_dir = os.path.join(args.dataset, args.split)
+
     written = 0
+    skipped_empty = 0
+    skipped_missing = 0
     with open(args.output, "w", encoding="utf-8") as f:
         for entry in lines:
             text = (entry.get("transcription") or "").strip()
             if not text:
+                skipped_empty += 1
+                continue
+            audio_path = os.path.join(split_dir, entry["file_name"])
+            if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
+                skipped_missing += 1
                 continue
             f.write(json.dumps({"audio": entry["file_name"], "text": text}) + "\n")
             written += 1
 
-    print(f"{args.output}: wrote {written} rows (skipped {len(lines) - written} empty)")
+    print(
+        f"{args.output}: wrote {written} rows "
+        f"(skipped {skipped_empty} empty, {skipped_missing} missing/corrupt audio)"
+    )
     print(f"Pass --data-root {os.path.join(args.dataset, args.split)} to moonshine-voice lora")
 
 
