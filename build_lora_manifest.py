@@ -16,6 +16,8 @@ import argparse
 import json
 import os
 
+import soundfile as sf
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build a moonshine-voice lora manifest from a packaged split.")
@@ -42,7 +44,11 @@ def main() -> None:
                 skipped_empty += 1
                 continue
             audio_path = os.path.join(split_dir, entry["file_name"])
-            if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
+            try:
+                # Header-only check (fast) -- catches missing, truncated, and
+                # corrupt files, unlike a plain os.path.exists/getsize check.
+                sf.info(audio_path)
+            except Exception:
                 skipped_missing += 1
                 continue
             f.write(json.dumps({"audio": entry["file_name"], "text": text}) + "\n")
@@ -50,7 +56,7 @@ def main() -> None:
 
     print(
         f"{args.output}: wrote {written} rows "
-        f"(skipped {skipped_empty} empty, {skipped_missing} missing/corrupt audio)"
+        f"(skipped {skipped_empty} empty, {skipped_missing} unreadable audio)"
     )
     print(f"Pass --data-root {os.path.join(args.dataset, args.split)} to moonshine-voice lora")
 
