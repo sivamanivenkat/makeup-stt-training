@@ -9,3 +9,5 @@ accelerate==1.1.1
 soundfile>=0.12.1
 librosa>=0.10.1
 tensorboard>=2.16.0
+jellyfish>=1.0.0
+pyspellchecker>=0.8.1
