@@ -18,6 +18,14 @@ import os
 
 import soundfile as sf
 
+# Reproducibly crashes moonshine-voice lora's loader (soundfile.LibsndfileError:
+# "System error" at open time) despite reading fine in every local check here --
+# unexplained, environment-specific flakiness rather than a real corrupt file.
+# Hard-excluded rather than spending more time chasing one row out of 13k+.
+_KNOWN_BAD_FILES = {
+    "audio/az8Tzf4OyJY_step2.wav",
+}
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build a moonshine-voice lora manifest from a packaged split.")
@@ -37,11 +45,15 @@ def main() -> None:
     written = 0
     skipped_empty = 0
     skipped_missing = 0
+    skipped_known_bad = 0
     with open(args.output, "w", encoding="utf-8") as f:
         for entry in lines:
             text = (entry.get("transcription") or "").strip()
             if not text:
                 skipped_empty += 1
+                continue
+            if entry["file_name"] in _KNOWN_BAD_FILES:
+                skipped_known_bad += 1
                 continue
             audio_path = os.path.join(split_dir, entry["file_name"])
             try:
@@ -59,7 +71,8 @@ def main() -> None:
 
     print(
         f"{args.output}: wrote {written} rows "
-        f"(skipped {skipped_empty} empty, {skipped_missing} unreadable audio)"
+        f"(skipped {skipped_empty} empty, {skipped_missing} unreadable audio, "
+        f"{skipped_known_bad} known-bad)"
     )
     print(f"Pass --data-root {os.path.join(args.dataset, args.split)} to moonshine-voice lora")
 
